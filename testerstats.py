@@ -28,6 +28,10 @@ def parse_args():
         '--average', dest='average_field', default="",
         help = 'generate an average of the values in the named field'
     )
+    parser.add_argument(
+        '--sum', dest='summate_field', default="",
+        help = "generate a sum of the values in the named field"
+    )
     args = parser.parse_args()
     args.filters = {}
     if len(args.filters_raw) > 2:
@@ -53,18 +57,24 @@ def parse_json_to_dict(ctx, data):
                 including += 1
                 d[record[ctx.sort_element]].append(record)
 
-    print "filtered out {num} results for {suite}".format(num=len(d), suite=ctx.suite)
+    print "filtered out {num} results for {suite}".format(num=including, suite=ctx.suite)
     return d
 
 def average_data(ctx, suite_data):
     averaged_data = {}
-    print "averaging over {num} keys".format(num=len(suite_data))
     for key, entries in suite_data.iteritems():
         sum = 0;
         for entry in entries:
             sum += entry[ctx.average_field]
         averaged_data[key] = sum / len(entries)
     return averaged_data
+
+def sum_data(ctx, suite_data):
+    sum = 0
+    for key, entries in suite_data.iteritems():
+        for entry in entries:
+            sum += entry[ctx.summate_field]
+    return sum
 
 def dump_results(data):
     for k,v in data.iteritems():
@@ -83,7 +93,12 @@ if __name__ == '__main__':
     except ValueError, e:
         print e
         sys.exit(1)
-    if (len(ctx.average_field) is not 0):
+    if len(ctx.average_field) is not 0:
         print "averaging on {field}".format(field=ctx.average_field)
         output = average_data(ctx, suite_data)
-    dump_results(output)
+        print "***** average of {field} *****".format(field=ctx.average_field)
+        dump_results(output)
+    if len(ctx.summate_field) is not 0:
+        print "summing on {field}".format(field=ctx.summate_field)
+        sum = sum_data(ctx, suite_data)
+        print "***** sum of {field} is {sum} *****".format(field=ctx.summate_field, sum=sum)
