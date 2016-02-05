@@ -7,37 +7,38 @@ import sys
 def parse_args():
     parser = argparse.ArgumentParser(description='Read JSON lab data and generate statistics.')
     parser.add_argument(
-        '--json-file', dest='json_file',
+        '--json-file', dest='json_file_string',
         required=True,
         help = 'JSON file describing jobs, from pulpito',
         )
     parser.add_argument(
-        '--suite', dest='suite',
+        '--suites', dest='suites_string',
         required=True,
-        help = 'suite to summarize',
+        help = 'suites to grab statistics on, as a comma-separated string',
         )
     parser.add_argument(
-        '--sort-by', dest='sort_element', default='description',
-        help = 'job element to use as key'
+        '--machine-types', dest='machine_types_string',
+        required=True,
+        help = 'machine types to include, as a comma-separated string'
     )
     parser.add_argument(
-        '--filter', dest='filters_raw', default='status:fail',
-        help = 'filter out elements matching your key:value[,k:v] string'
+        '--combine-machines', help='do not split up results by machine',
+        action='store_true'
     )
-    parser.add_argument(
-        '--average', dest='average_field', default="",
-        help = 'generate an average of the values in the named field'
-    )
-    parser.add_argument(
-        '--sum', dest='summate_field', default="",
-        help = "generate a sum of the values in the named field"
-    )
+
     args = parser.parse_args()
-    args.filters = {}
-    if len(args.filters_raw) > 2:
-        for filter in args.filters_raw.split(','):
-            [k,v] = filter.split(':')
-            args.filters[k]=v
+
+    args.suites = split(args.suites_string, ',')
+    args.machine_types = split(args.machine_types_string, ',')
+
+    def stringcheck(strings):
+        for entry in strings:
+            if not isinstance(entry, basestring):
+                print "'{entry}'' is not a string".format(entry=entry)
+                sys.exit(1)
+    stringcheck(args.suites)
+    stringcheck(args.machine_types)
+
     return args
 
 def parse_json_to_dict(ctx, data):
@@ -45,22 +46,20 @@ def parse_json_to_dict(ctx, data):
         json_data = json.loads(data)
     except ValueError, e:
         raise ValueError('could not parse json data')
-    d = defaultdict(list)
+    d = defaultdict(defaultdict(list)) # suite -> run -> list of jobs
     including = 0
     for record in json_data:
         include = True
-        if (ctx.suite == record['suite']):
-            for k,v in ctx.filters.iteritems():
-                if (record[k]==v):
-                    include = False
-            if include is True:
-                including += 1
-                d[record[ctx.sort_element]].append(record)
+        if (record['suite'] in args.suites):
+            including += 1
+            run_name = split(record['job'], '/')
+            d[record['suite']][run_name].append(record)
 
-    print "filtered out {num} results for {suite}".format(num=including, suite=ctx.suite)
+    print "filtered out {num} results for {suites}".format(num=including, suites=ctx.suites_string)
     return d
 
 def average_data(ctx, suite_data):
+    # Okay, this method needs to average across runs. Much change required.
     averaged_data = {}
     for key, entries in suite_data.iteritems():
         sum = 0;
@@ -89,12 +88,11 @@ if __name__ == '__main__':
         print e
         sys.exit(1)
     try:
-        output = suite_data = parse_json_to_dict(ctx, json_stream)
+        suite_data = parse_json_to_dict(ctx, json_stream)
     except ValueError, e:
         print e
         sys.exit(1)
-    if len(ctx.average_field) is not 0:
-        print "averaging on {field}".format(field=ctx.average_field)
+    for suite in suite_data:
         output = average_data(ctx, suite_data)
         print "***** average of {field} *****".format(field=ctx.average_field)
         dump_results(output)
