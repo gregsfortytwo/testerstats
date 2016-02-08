@@ -106,10 +106,19 @@ def print_suite_stats(suite_totals):
         run_count += 1
     print "Average machine runtime: {time} seconds".format(time=total_time/run_count)
     print "Longest machine runtime: {name} in {time} seconds".format(
-        name=largest_time[0], time=largest_time[1] )
+        name=largest_time[0], time=largest_time[1] )        
 
 def print_job_stats(job_results):
-    print "hello job stats"
+    print "(machine time, number of runs, machines used):description"
+    results_list = list()
+    for job_name, results in job_results.iteritems():
+        list_tuple = (job_name, results)
+        results_list.append(list_tuple)
+    results_list.sort(key=lambda result: int(result[1][0])/result[1][1])
+    for result_tuple in results_list:
+        results = result_tuple[1]
+        average = results[0]/results[1]
+        print "({avg},{num},{mcount}):{name}".format(name=result_tuple[0],avg=average,num=results[1],mcount=results[2])
 
 if __name__ == '__main__':
     ctx = parse_args()
@@ -130,4 +139,4 @@ if __name__ == '__main__':
         print "********** Results for suite {name} **********".format(name=suite_name)
         print_suite_stats(suite_total_times)
         print "     ***** Job results *****     "
-        print_job_stats(job_results)
+        print_job_stats(combined_job_results)
