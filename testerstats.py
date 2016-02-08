@@ -22,14 +22,14 @@ def parse_args():
         help = 'machine types to include, as a comma-separated string'
     )
     parser.add_argument(
-        '--combine-machines', help='do not split up results by machine',
+        '--include-failed', help='do not exclude non-passed runs',
         action='store_true'
     )
 
     args = parser.parse_args()
 
-    args.suites = split(args.suites_string, ',')
-    args.machine_types = split(args.machine_types_string, ',')
+    args.suites = args.suites_string.split(',')
+    args.machine_types = args.machine_types_string.split(',')
 
     def stringcheck(strings):
         for entry in strings:
@@ -46,43 +46,75 @@ def parse_json_to_dict(ctx, data):
         json_data = json.loads(data)
     except ValueError, e:
         raise ValueError('could not parse json data')
-    d = defaultdict(defaultdict(list)) # suite -> run -> list of jobs
+    d = defaultdict(dict) # suite -> run -> list of jobs
     including = 0
     for record in json_data:
-        include = True
-        if (record['suite'] in args.suites):
+        if (record['suite'] in ctx.suites) and \
+            (record['status'] == "pass" or ctx.include_failed):
             including += 1
-            run_name = split(record['job'], '/')
+            run_name = record['job'].split('/')[0]
+            if not run_name in d[record['suite']]:
+                d[record['suite']][run_name] = list()
             d[record['suite']][run_name].append(record)
 
     print "filtered out {num} results for {suites}".format(num=including, suites=ctx.suites_string)
     return d
+    
+def sum_data(suite_data):
+    """suite_data: run -> [job1, job2, ...]
+    Returns two-element tuple; dict of suite names to total machine times, and
+        dict of job descriptions to list of runs
+    """
+    suite_run_results = {}
+    job_results = defaultdict(list) # description -> [job1, job2, ...]
+    for run_name, jobs in suite_data.iteritems():
+        run_machine_time_sum = 0
+        for job in jobs:
+            run_machine_time_sum += job['duration'] * job['nodes']
+            job_results[job['description']].append(job)
+        suite_run_results[run_name] = run_machine_time_sum
+    return (suite_run_results, job_results)
 
-def average_data(ctx, suite_data):
-    # Okay, this method needs to average across runs. Much change required.
-    averaged_data = {}
-    for key, entries in suite_data.iteritems():
-        sum = 0;
-        for entry in entries:
-            sum += entry[ctx.average_field]
-        averaged_data[key] = sum / len(entries)
-    return averaged_data
+def combine_job_results(job_results):
+    """job_results: description -> [job1, job2, ...]
+    Returns a dict of job description -> tuple(total machine time, num runs, num machines)
+    """
+    averaged_results = {} # description -> (total machine runtime, num runs, num machines)
+    for description, jobs in job_results.iteritems():
+        total_machine_time = 0
+        num_job_runs = 0
+        num_machines = 0
+        warned_on_change = False
+        for job in jobs:
+            total_machine_time += job['duration'] * job['nodes']
+            num_job_runs += 1
+            if num_machines is not 0 and num_machines != job['nodes'] and not warned_on_change:
+                print "{desc} changed required machine number".format(desc=description)
+                warned_on_change = True
+            num_machines = job['nodes']
+            averaged_results[description] = (total_machine_time, num_job_runs, num_machines)
+    return averaged_results
 
-def sum_data(ctx, suite_data):
-    sum = 0
-    for key, entries in suite_data.iteritems():
-        for entry in entries:
-            sum += entry[ctx.summate_field]
-    return sum
+def print_suite_stats(suite_totals):
+    total_time = 0
+    largest_time = ("", 0)
+    run_count = 0
+    for run_name, time in suite_totals.iteritems():
+        total_time += time
+        if time > largest_time[1]:
+            largest_time = (run_name, time)
+        run_count += 1
+    print "Average machine runtime: {time} seconds".format(time=total_time/run_count)
+    print "Longest machine runtime: {name} in {time} seconds".format(
+        name=largest_time[0], time=largest_time[1] )
 
-def dump_results(data):
-    for k,v in data.iteritems():
-        print "{desc}: {results}".format(desc=k, results=v)
+def print_job_stats(job_results):
+    print "hello job stats"
 
 if __name__ == '__main__':
     ctx = parse_args()
     try:
-        json_stream = open(ctx.json_file).read()
+        json_stream = open(ctx.json_file_string).read()
     except IOError as e:
         print 'cannot open %s' % json_stream
         print e
@@ -92,11 +124,10 @@ if __name__ == '__main__':
     except ValueError, e:
         print e
         sys.exit(1)
-    for suite in suite_data:
-        output = average_data(ctx, suite_data)
-        print "***** average of {field} *****".format(field=ctx.average_field)
-        dump_results(output)
-    if len(ctx.summate_field) is not 0:
-        print "summing on {field}".format(field=ctx.summate_field)
-        sum = sum_data(ctx, suite_data)
-        print "***** sum of {field} is {sum} *****".format(field=ctx.summate_field, sum=sum)
+    for (suite_name, suite_results) in suite_data.iteritems():
+        (suite_total_times, job_results) = sum_data(suite_results)
+        combined_job_results = combine_job_results(job_results)
+        print "********** Results for suite {name} **********".format(name=suite_name)
+        print_suite_stats(suite_total_times)
+        print "     ***** Job results *****     "
+        print_job_stats(job_results)
